@@ -1,9 +1,5 @@
-obj-m += template.o
+obj-m := kernel_sync_demo.o
 
-# Objects that make up the module (paths relative to this src/ dir).
-# Add files here for a multi-file module:
-#   template-y += foo.o bar.o
-template-y := main.o
+kernel_sync_demo-y := main.o params.o worker.o sync.o
 
-# Header search path (so src/*.c can #include "foo.h" from this dir)
 ccflags-y := -I$(src)

@@ -1,6 +1,6 @@
 # Rename the module in TWO places: MODULE_NAME below, and obj-m/template-y in
 # src/Kbuild.
-MODULE_NAME := template
+MODULE_NAME := kernel_sync_demo
 
 KDIR     ?= /lib/modules/$(shell uname -r)/build
 SRC      := $(abspath src)
