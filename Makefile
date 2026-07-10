@@ -9,7 +9,7 @@ DEVTOOLS := $(abspath devtools)
 
 .PHONY: all clean load unload format compdb \
         qemu-setup qemu-setup-debug qemu-build qemu-boot qemu-debug \
-        gdb-attach qemu-test help
+        gdb-attach qemu-test qemu-test-full help
 
 # --- Build the module. KDIR defaults to the host kernel; build.sh overrides it
 # with the QEMU kernel. MO= sends every generated file straight to build/, so
@@ -60,6 +60,8 @@ gdb-attach:                 ## attach GDB to the paused guest (terminal 2)
 	$(DEVTOOLS)/gdb.sh
 qemu-test: qemu-build       ## automated insmod/rmmod of the built module
 	$(DEVTOOLS)/test.sh
+qemu-test-full: qemu-build  ## full sysfs functional suite: validation, all 3 lock types, reset, EBUSY
+	$(DEVTOOLS)/test_full.sh
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
