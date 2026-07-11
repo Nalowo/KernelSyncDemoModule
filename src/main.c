@@ -3,6 +3,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/slab.h>
 
 #include "kernel_sync_demo.h"
 
@@ -26,12 +27,10 @@ static int __init kernel_sync_demo_init(void) {
   atomic_set(&g_ctx.threads_done, 0);
   g_ctx.last_run_result = SD_OK;
 
-  sync_locks_init(&g_ctx);
+  g_ctx.is_test_active = false;
+  mutex_init(&g_ctx.ctx_lock);
 
-  /* TODO: module_param_cb-регистрации из params.c подключаются
-   * автоматически при линковке — здесь дополнительных действий
-   * не требуется. При необходимости — доп. инициализация ресурсов.
-   */
+  sync_locks_init(&g_ctx);
 
   pr_info(
       "kernel_sync_demo: loaded (num_threads=%u iterations=%u lock_type=%u)\n",
@@ -41,9 +40,16 @@ static int __init kernel_sync_demo_init(void) {
 }
 
 static void __exit kernel_sync_demo_exit(void) {
-  /* TODO: убедиться, что тест не активен (все потоки завершены)
-   * перед выгрузкой. Освободить g_ctx.threads (kfree), если выделен.
-   */
+  mutex_lock(&g_ctx.ctx_lock);
+
+  if (g_ctx.threads != NULL) {
+    kfree(g_ctx.threads);
+    g_ctx.threads = NULL;
+  }
+
+  mutex_unlock(&g_ctx.ctx_lock);
+  mutex_destroy(&g_ctx.ctx_lock);
+  mutex_destroy(&g_ctx.mlock);
 
   pr_info("kernel_sync_demo: unloaded\n");
 }

@@ -4,6 +4,7 @@
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/sched.h>
+#include <linux/sched/task.h>
 #include <linux/slab.h>
 
 #include "kernel_sync_demo.h"
@@ -63,8 +64,10 @@ int sync_run_test(struct sync_ctx *ctx) {
         kthread_create(sync_worker_thread_fn, args, "sync_demo/%u", i);
     if (IS_ERR(ctx->threads[i])) {
       for (int j = 0; j < i; ++j) {
-        if (!IS_ERR(ctx->threads[j]))
+        if (!IS_ERR(ctx->threads[j])) {
           kthread_stop(ctx->threads[j]);
+          put_task_struct(ctx->threads[j]);
+        }
       }
       kfree(worker_array);
       kfree(ctx->threads);
@@ -72,6 +75,7 @@ int sync_run_test(struct sync_ctx *ctx) {
       ctx->last_run_result = SD_NOMEM;
       return SD_NOMEM;
     }
+    get_task_struct(ctx->threads[i]);
   }
 
   for (unsigned int i = 0; i < ctx->num_threads; ++i) {
@@ -81,7 +85,7 @@ int sync_run_test(struct sync_ctx *ctx) {
   for (unsigned int i = 0; i < ctx->num_threads; ++i) {
     kthread_stop(ctx->threads[i]);
     ctx->total_wait_time = ktime_add(ctx->total_wait_time, worker_array[i].wait_time);
-    ctx->threads_done;
+    put_task_struct(ctx->threads[i]);
   }
 
   kfree(worker_array);
