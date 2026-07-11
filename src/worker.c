@@ -1,5 +1,6 @@
 // Логика рабочих потоков (kthread): цикл инкремент/декремент под блокировкой.
 
+#include <linux/err.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/sched.h>
@@ -15,21 +16,13 @@ int sync_worker_thread_fn(void *arg) {
   wargs->wait_time = ktime_set(0, 0);
 
   for (i = 0; i < ctx->iterations; i++) {
-    /* TODO: захват блокировки для инкремента:
-     *   sync_lock_acquire(ctx, &wargs->wait_time, &ctx->contention_count);
-     *   ctx->shared_counter++;
-     *   sync_lock_release(ctx);
-     */
+    sync_lock_acquire(ctx, &wargs->wait_time, &ctx->contention_count);
+    ctx->shared_counter++;
+    sync_lock_release(ctx);
 
-    /* TODO: отдельный захват/освобождение для декремента:
-     *   sync_lock_acquire(ctx, &wargs->wait_time, &ctx->contention_count);
-     *   ctx->shared_counter--;
-     *   sync_lock_release(ctx);
-     *
-     * Обязательное требование: блокировка захватывается и
-     * освобождается на каждой итерации — не держать её на
-     * весь цикл.
-     */
+    sync_lock_acquire(ctx, &wargs->wait_time, &ctx->contention_count);
+    ctx->shared_counter--;
+    sync_lock_release(ctx);
   }
 
   atomic_inc(&ctx->threads_done);
@@ -38,24 +31,62 @@ int sync_worker_thread_fn(void *arg) {
 }
 
 int sync_run_test(struct sync_ctx *ctx) {
-  /* TODO:
-   * 1. Проверить, что предыдущий тест не активен (иначе SD_BUSY).
-   * 2. sync_locks_init(ctx); сбросить shared_counter/total_wait_time/
-   *    contention_count.
-   * 3. Выделить ctx->threads = kmalloc(ctx->num_threads * sizeof(*), ...)
-   *    и массив struct worker_args под каждый поток.
-   * 4. Для каждого потока: kthread_create(sync_worker_thread_fn, &args[i],
-   * "sync_demo/%u", i) — при ошибке освободить уже созданные потоки/память и
-   * вернуть SD_NOMEM.
-   * 5. wake_up_process() для каждого созданного потока.
-   * 6. Дождаться завершения всех потоков (kthread_stop() каждого —
-   *    т.к. функция потока сама возвращается, kthread_stop() тут
-   *    корректно дождётся завершения и заберёт код возврата).
-   * 7. Просуммировать wait_time из каждого worker_args в
-   *    ctx->total_wait_time.
-   * 8. kfree() временных массивов threads/args, обнулить ctx->threads.
-   * 9. Записать итог в ctx->last_run_result и вернуть его.
-   */
+  ctx->threads =
+      kmalloc_array(ctx->num_threads, sizeof(*ctx->threads), GFP_KERNEL);
+  struct worker_args *worker_array =
+      kmalloc_array(ctx->num_threads, sizeof(struct worker_args), GFP_KERNEL);
+  if (ctx->threads == NULL || worker_array == NULL) {
+    if (ctx->threads != NULL) {
+      kfree(ctx->threads);
+      ctx->threads = NULL;
+    }
+    if (worker_array != NULL)
+      kfree(worker_array);
+    ctx->last_run_result = SD_NOMEM;
+    return SD_NOMEM;
+  }
 
+  ctx->shared_counter = 0;
+  ctx->total_wait_time = ktime_set(0, 0);
+  ctx->contention_count = 0;
+  atomic_set(&ctx->threads_done, 0);
+
+  sync_locks_init(ctx);
+
+  for (unsigned int i = 0; i < ctx->num_threads; ++i) {
+    struct worker_args *args = &(worker_array[i]);
+    args->ctx = ctx;
+    args->thread_id = i;
+    args->wait_time = 0;
+
+    ctx->threads[i] =
+        kthread_create(sync_worker_thread_fn, args, "sync_demo/%u", i);
+    if (IS_ERR(ctx->threads[i])) {
+      for (int j = 0; j < i; ++j) {
+        if (!IS_ERR(ctx->threads[j]))
+          kthread_stop(ctx->threads[j]);
+      }
+      kfree(worker_array);
+      kfree(ctx->threads);
+      ctx->threads = NULL;
+      ctx->last_run_result = SD_NOMEM;
+      return SD_NOMEM;
+    }
+  }
+
+  for (unsigned int i = 0; i < ctx->num_threads; ++i) {
+    wake_up_process(ctx->threads[i]);
+  }
+
+  for (unsigned int i = 0; i < ctx->num_threads; ++i) {
+    kthread_stop(ctx->threads[i]);
+    ctx->total_wait_time = ktime_add(ctx->total_wait_time, worker_array[i].wait_time);
+    ctx->threads_done;
+  }
+
+  kfree(worker_array);
+  kfree(ctx->threads);
+  ctx->threads = NULL;
+  ctx->last_run_result = SD_OK;
   return SD_OK;
 }
